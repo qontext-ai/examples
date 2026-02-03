@@ -19,7 +19,6 @@ class QontextAgent(BaseAgent):
     project_id: Optional[str] = None
     
     api_key: Optional[str] = None
-    workspace_id: Optional[str] = None
     kg_id: Optional[str] = None
     
     http_session: Any = None
@@ -203,12 +202,10 @@ Standalone Search Query (concise):"""
         url = "https://api.qontext.ai/v1/retrieval"
         
         payload = {
-            "workspaceId": str(self.workspace_id),
             "knowledgeGraphId": str(self.kg_id),
             "prompt": str(prompt),
             "limit": 5,
             "depth": 1,
-            "rerank": True
         }
         
         headers = {
@@ -255,7 +252,6 @@ Standalone Search Query (concise):"""
         
         secret_map = {
             "api_key": "QONTEXT_API_KEY_SECRET",
-            "workspace_id": "QONTEXT_WORKSPACE_ID",
             "kg_id": "QONTEXT_KNOWLEDGE_GRAPH_ID"
         }
         
