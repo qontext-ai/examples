@@ -1,0 +1,7 @@
+google-cloud-aiplatform[agent_engines,adk]>=1.132.0
+google-adk>=1.22.0
+cloudpickle==3.0.0
+pydantic==2.12.5
+google-cloud-secret-manager
+aiohttp       
+requests==2.32.5
