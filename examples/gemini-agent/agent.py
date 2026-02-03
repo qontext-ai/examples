@@ -202,7 +202,7 @@ Standalone Search Query (concise):"""
         url = "https://api.qontext.ai/v1/retrieval"
         
         payload = {
-            "vaultId": str(self.vault_id),
+            "knowledgeGraphId": str(self.vault_id),
             "prompt": str(prompt),
             "limit": 5,
             "depth": 1,
