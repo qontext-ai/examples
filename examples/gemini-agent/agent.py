@@ -19,7 +19,7 @@ class QontextAgent(BaseAgent):
     project_id: Optional[str] = None
     
     api_key: Optional[str] = None
-    kg_id: Optional[str] = None
+    vault_id: Optional[str] = None
     
     http_session: Any = None
     model_client: Any = None
@@ -202,7 +202,7 @@ Standalone Search Query (concise):"""
         url = "https://api.qontext.ai/v1/retrieval"
         
         payload = {
-            "knowledgeGraphId": str(self.kg_id),
+            "knowledgeGraphId": str(self.vault_id),
             "prompt": str(prompt),
             "limit": 5,
             "depth": 1,
@@ -252,7 +252,7 @@ Standalone Search Query (concise):"""
         
         secret_map = {
             "api_key": "QONTEXT_API_KEY_SECRET",
-            "kg_id": "QONTEXT_KNOWLEDGE_GRAPH_ID"
+            "vault_id": "QONTEXT_VAULT_ID_SECRET"
         }
         
         for attr, secret_id in secret_map.items():
