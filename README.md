@@ -4,7 +4,7 @@ Demos and sample projects that use the [Qontext AI](https://qontext.ai) API for 
 
 ## What's in this repo
 
-- **gemini-agent** — Agent that answers prompts based on context saved in a Qontext vault. This makes the vault directly chattable. Answers are generated with Vertex AI Gemini (Google ADK). Requires `QONTEXT_API_KEY`, `QONTEXT_WORKSPACE_ID`, and `QONTEXT_KNOWLEDGE_GRAPH_ID`; From the repo root: `cd gemini-agent && pip install -r requirements.txt`, then see the folder for our Gemini Docs.
+- **gemini-agent** — Agent that answers prompts based on context saved in a Qontext vault. Follow the instructions in our Gemini Docs for the correct implementation.
 
 ## Resources
 - [Qontext AI](https://qontext.ai)
