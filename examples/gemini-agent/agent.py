@@ -28,7 +28,7 @@ class QontextAgent(BaseAgent):
         """Initialize the Qontext agent with default configuration."""
         kwargs.setdefault("name", "qontext_agent_example")
         kwargs.setdefault("model_name", os.environ.get("MODEL_NAME", "gemini-2.0-flash"))
-        kwargs.setdefault("project_id", os.environ.get("GCP_PROJECT_ID"))
+        kwargs.setdefault("project_id", os.environ.get("GCP_PROJECT_ID")) # Add your GCP project ID to the .env file
         super().__init__(**kwargs)
 
     async def set_up(self) -> None:
@@ -37,7 +37,10 @@ class QontextAgent(BaseAgent):
             self.http_session = aiohttp.ClientSession()
         
         self.model_client = GenerativeModel(self.model_name)
-        await self._load_from_secret_manager()
+
+        # Load credentials from Secret Manager
+        if not self.api_key or not self.vault_id:
+            await self._load_from_secret_manager()
 
     async def _run_async_impl(
         self, 
@@ -65,7 +68,7 @@ class QontextAgent(BaseAgent):
 
         if not hasattr(ctx.session, 'state') or ctx.session.state is None:
             ctx.session.state = {}
-        
+
         user_message = self._extract_user_message(ctx)
         conversation_history = self._build_conversation_history(ctx)
         search_query = await self._rewrite_query(user_message, conversation_history)
@@ -105,6 +108,12 @@ class QontextAgent(BaseAgent):
         
         rewrite_prompt = f"""Given the following conversation history and a new user message, rewrite the user message to be a standalone search query. 
 The goal is to replace pronouns (he, she, it, they, that) with the actual entities they refer to so the query can be used for a database search.
+
+The query rewritten by you should be in line with the following examples:
+- Who is John Doe?
+- What is NVIDIA?
+- Tell me everything you know about the company ACME Co.
+- What is Example Inc. Sales Strategy?
 
 History:
 {history_str}
@@ -180,20 +189,27 @@ Standalone Search Query (concise):"""
         return conversation_history
 
     def _format_context_data(self, context_data: Dict[str, Any]) -> str:
-        """Format Qontext results into a readable string."""
-        # Handle direct list response
+        """Format Qontext API response into a readable string (text + sources)."""
+        def format_item(item: Any) -> str:
+            if isinstance(item, str):
+                return f"- {item}"
+            if not isinstance(item, dict):
+                return f"- {item}"
+            text = item.get("text", str(item))
+            parts = [f"- {text}"]
+            sources = item.get("sources") or []
+            if sources:
+                urls = [s.get("source_url") for s in sources if isinstance(s, dict) and s.get("source_url")]
+                if urls:
+                    parts.append("  Sources: " + "; ".join(urls))
+            return "\n".join(parts)
+
+        if isinstance(context_data, dict) and "data" in context_data:
+            return "\n\n".join(format_item(i) for i in context_data["data"])
+        if isinstance(context_data, dict) and "results" in context_data:
+            return "\n\n".join(format_item(r) for r in context_data["results"])
         if isinstance(context_data, list):
             return "\n".join([f"- {item}" for item in context_data])
-        
-        # Handle dict with results array
-        if isinstance(context_data, dict) and "results" in context_data:
-            results = context_data["results"]
-            formatted = []
-            for res in results:
-                text = res if isinstance(res, str) else res.get("text", str(res))
-                formatted.append(f"- {text}")
-            return "\n".join(formatted)
-        
         return str(context_data)
 
     # Qontext API Methods
@@ -202,10 +218,11 @@ Standalone Search Query (concise):"""
         url = "https://api.qontext.ai/v1/retrieval"
         
         payload = {
-            "knowledgeGraphId": str(self.vault_id),
+            "vaultId": str(self.vault_id),
             "prompt": str(prompt),
             "limit": 5,
             "depth": 1,
+            "includeSources": True,
         }
         
         headers = {
@@ -220,10 +237,9 @@ Standalone Search Query (concise):"""
                 json=payload, 
                 timeout=15
             ) as response:
-                if response.status == 201:
+                if response.status in (200, 201):
                     data = await response.json()
                     return self._sanitize_for_pydantic(data)
-                
                 error_text = await response.text()
                 return {"error": error_text}
                 
