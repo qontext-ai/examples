@@ -113,7 +113,7 @@ The query rewritten by you should be in line with the following examples:
 - Who is John Doe?
 - What is NVIDIA?
 - Tell me everything you know about the company ACME Co.
-- What is Example Inc.s Sales Strategy?
+- What is Example Inc. Sales Strategy?
 
 History:
 {history_str}
@@ -275,11 +275,5 @@ Standalone Search Query (concise):"""
             path = f"projects/{self.project_id}/secrets/{secret_id}/versions/latest"
             response = client.access_secret_version(request={"name": path})
             setattr(self, attr, response.payload.data.decode('UTF-8'))
-
-    async def tear_down(self) -> None:
-        """Close HTTP session. Call when shutting down the agent."""
-        if self.http_session and not self.http_session.closed:
-            await self.http_session.close()
-            self.http_session = None
 
 root_agent = QontextAgent()
