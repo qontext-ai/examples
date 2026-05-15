@@ -44,8 +44,6 @@ Look for a line whose URL or command-args contain `api.qontext.ai/mcp` (the prod
 - `<name>: http(s) - https://api.qontext.ai/mcp`
 - `<name>: stdio - npx mcp-remote https://api.qontext.ai/mcp`
 
-Explicitly **ignore** any servers whose URL points at non-prod endpoints (e.g., URLs containing `localhost`, `staging.qontext.ai`, `preview.qontext.ai`, `pr-*.qontext.ai`). Those are dev/preview environments and don't carry the user's real workspace data.
-
 Record the resolved name (e.g., `qontext`, `qontext-ai`, `qontext-ai-mcp`) — call it `<SERVER>`. Every MCP tool call below will use `mcp__<SERVER>__qontext_*`.
 
 #### Step 1a.ii — Handle the three branches
