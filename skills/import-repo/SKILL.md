@@ -200,11 +200,14 @@ Ask: *"Found N folder descriptions (index.md, README.md). Convert them to Qontex
 - "Convert and rewrite links to ids" *(recommended)* — each folder description becomes that folder's `.qontext.structure.md`. The original file is not imported. Links that pointed at it are rewritten to the folder's id (see Step 3 → Link rewriting).
 - "Do not convert" — import them as ordinary content files.
 
-If the user converts, ask one more question, **strictness**, applied to every generated structure file:
+If the user converts, ask one more question, **strictness**, applied to every generated structure file. Keep the options in this order (least to most careful). The scale has five levels; `permissive` is the fifth and is reachable through the "Other" slot.
 
-- "moderate" *(recommended)* — the update agent acts when the case clearly holds
-- "firm" — the agent acts only on an unambiguous fit. Use for canonical records or word-for-word mirrors.
-- "permissive" — the agent acts when the content plausibly fits
+- "lenient" — The agent changes the folder when new content is a likely fit and skips a weak one. Use for inbox-style folders where capturing material matters more than exact placement.
+- "moderate (recommended)" — The agent changes the folder only when the case clearly holds. This is the default for a folder with no structure file.
+- "firm" — The agent acts only on an unambiguous fit. A partial or marginal match is skipped. Use for canonical records, one file per entity.
+- "strict" — The agent acts only when the match is certain and the change is small. Use for word-for-word mirrors of a source, for example published policies.
+
+Add to the question's `description`: *"Type `permissive` under Other for the least careful level: the agent acts when content plausibly fits."*
 
 Then check each target folder for an existing structure file: call `qontext_cat` on `<target>/<folder>/.qontext.structure.md` (a not-found error is fine, treat as "none"). For each folder that already has one, ask once:
 
