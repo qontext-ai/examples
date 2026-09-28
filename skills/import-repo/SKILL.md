@@ -1,7 +1,7 @@
 ---
 name: import-repo
 description: Import a local git repository (or any local directory tree) into the user's Qontext workspace via the qontext-ai MCP server. Use this skill whenever the user wants to bulk-load a repo, codebase, project, or folder of source files into Qontext, their workspace, or their vault. Triggers on phrases like "import repo to qontext", "ingest my codebase", "upload this project to my workspace", "load files into the vault", "qontext repo import", "put this repo into qontext", or anything similar. Trigger even if the user does not say "Qontext" by name — if they mention importing/ingesting/uploading a directory of files in the context of a workspace, vault, or MCP server that handles knowledge, use this skill.
-allowed-tools: AskUserQuestion, Bash, Read, Glob, mcp__qontext-ai__qontext_ls, mcp__qontext-ai__qontext_find, mcp__qontext-ai__qontext_mkdir, mcp__qontext-ai__qontext_write, mcp__qontext-ai__qontext_rm
+allowed-tools: AskUserQuestion, Bash, Read, Glob, mcp__qontext-ai__qontext_ls, mcp__qontext-ai__qontext_find, mcp__qontext-ai__qontext_cat, mcp__qontext-ai__qontext_mkdir, mcp__qontext-ai__qontext_write, mcp__qontext-ai__qontext_rm
 ---
 
 # import-repo
@@ -162,6 +162,21 @@ done
 
 Aggregate the results across all selected paths (sum the extension counts; union the dot-folder, submodule, sensitive, and oversized lists). Keep this aggregate in memory for the remaining questions.
 
+Also scan `<SCOPE>` for folder-description files and for relative Markdown links. Questions 2b.1 and 2b.2 and the Step 3 link rewriting use these results.
+
+```bash
+for p in $SCOPE_PATHS; do
+  # Folder-description files. Count one per folder, first match in this
+  # priority order: index.md, _index.md, README.md. log.md is a change log.
+  find "$p" -type f \( -name 'index.md' -o -name '_index.md' -o -name 'README.md' -o -name 'log.md' \) \
+    -not -path '*/\.git/*'
+
+  # Relative Markdown links: no URI scheme, no leading "/", no "#anchor".
+  # Prints "<file>:<count>". These links MUST be rewritten before writing (see Step 3).
+  grep -rEoH '\]\([^)#/][^):]*\)' --include='*.md' "$p" | cut -d: -f1 | sort | uniq -c
+done
+```
+
 #### 2b. Target Qontext path
 
 Default to `/<repo-name-slug>` (lowercase, dashes for spaces/underscores). Allow free-text override.
@@ -174,9 +189,44 @@ If the target already has content, ask:
 - "Overwrite matching paths" — `qontext_write` will replace existing files at the same paths
 - "Skip existing" — files that already exist in Qontext get left alone
 
+#### 2b.1 Folder descriptions → structure files
+
+Only ask if the deep scan found at least one `index.md`, `_index.md`, or `README.md` inside `<SCOPE>`. Count one file per folder, in that priority order. A `README.md` at the repo root counts as the root's description.
+
+Background: Qontext keeps the guidance for a folder in a **structure file**, `.qontext.structure.md`, one per folder. It tells Qontext what belongs in the folder, how files are named, and how careful automatic updates must be. It is folder configuration, not knowledge: Qontext never indexes it and never retrieves it as content. A folder description (`index.md`, `README.md`) carries the same information in another shape. See https://docs.qontext.ai/features/structure-files.
+
+Ask: *"Found N folder descriptions (index.md, README.md). Convert them to Qontext structure files?"*
+
+- "Convert and rewrite links to ids" *(recommended)* — each folder description becomes that folder's `.qontext.structure.md`. The original file is not imported. Links that pointed at it are rewritten to the folder's id (see Step 3 → Link rewriting).
+- "Do not convert" — import them as ordinary content files.
+
+If the user converts, ask one more question, **strictness**, applied to every generated structure file. Keep the options in this order (least to most careful). The scale has five levels; `permissive` is the fifth and is reachable through the "Other" slot.
+
+- "lenient" — The agent changes the folder when new content is a likely fit and skips a weak one. Use for inbox-style folders where capturing material matters more than exact placement.
+- "moderate (recommended)" — The agent changes the folder only when the case clearly holds. This is the default for a folder with no structure file.
+- "firm" — The agent acts only on an unambiguous fit. A partial or marginal match is skipped. Use for canonical records, one file per entity.
+- "strict" — The agent acts only when the match is certain and the change is small. Use for word-for-word mirrors of a source, for example published policies.
+
+Add to the question's `description`: *"Type `permissive` under Other for the least careful level: the agent acts when content plausibly fits."*
+
+Then check each target folder for an existing structure file: call `qontext_cat` on `<target>/<folder>/.qontext.structure.md` (a not-found error is fine, treat as "none"). For each folder that already has one, ask once:
+
+- "Amend" *(recommended)* — keep the existing frontmatter and body; append the converted guidance under a heading `## Imported from <repo-relative-path>`
+- "Keep existing" — do not touch it; skip the conversion for this folder
+- "Replace" — overwrite it
+
+Record the answers as `<STRUCTURE>`: off, or strictness plus the per-folder mode.
+
+#### 2b.2 `log.md` change logs
+
+Only ask if the deep scan found a `log.md` inside `<SCOPE>` and 2b.1 is on. Qontext keeps a commit history per file, so a hand-kept log is optional.
+
+- "Drop log.md" *(recommended)* — do not import it. Links to it are rewritten to the folder's id.
+- "Keep log.md and maintain it" — import it as content, and add this rule to the folder's structure file: *"Append one dated entry to `log.md` for each change in this folder. Newest entry first."*
+
 #### 2c. Non-`.md` files
 
-Ask if any non-`.md` files were found. Show the top 10 extensions with counts in the question's `description`, e.g. *"Found: .py × 142, .ts × 88, .json × 12, .css × 9, .yaml × 4, ..."*.
+Ask if any non-`.md` files were found. Files handled in 2b.1 and 2b.2 are not affected by this choice. Show the top 10 extensions with counts in the question's `description`, e.g. *"Found: .py × 142, .ts × 88, .json × 12, .css × 9, .yaml × 4, ..."*.
 
 - "Ignore (recommended)" — only existing `.md` files get imported; everything else skipped
 - "Import as `.md` with fenced code block" — wrap each file's content in a markdown fence, language tag inferred from extension (see "Extension → language" table below)
@@ -210,7 +260,7 @@ Only ask if the scan found any. List them in the description.
 
 Only ask if any oversized files were found. Surface the count and total bytes.
 
-- "Skip oversized files (recommended)" — the MCP has a hard 45 KB per-file cap; these will not be written
+- "Skip oversized files (recommended)" — the MCP has a hard cap of 51,200 characters per file (45 KB is the safe scan threshold); these will not be written
 - "Split into a sibling folder" — write a stub `.md` in place with a pointer, and dump the (truncated) content into a `_oversized/` sibling folder. Lower priority — only implement this branch if the user explicitly picks it.
 
 #### 2h. Final confirm
@@ -226,6 +276,9 @@ Import plan
   Non-.md files: wrap in fenced code blocks
   Dot-folders:   skip all
   Submodules:    n/a
+  Structure files: convert 6 folder descriptions (strictness: moderate, 1 amend)
+  log.md:        drop 1
+  Links:         rewrite 41 relative links to ids (2 passes)
 ```
 
 Then ask one final yes/no via `AskUserQuestion`: *"Proceed with import?"*
@@ -256,10 +309,78 @@ Qontext rejects certain folder names. Apply these rules in order:
 
 If sanitization causes a collision with an existing sibling (e.g., the source has both `.github` and `dot-github`), append `-1`, `-2`, etc. to the second one to disambiguate.
 
+Record `source folder → dir_id` from every `qontext_mkdir` result (the returned node carries `id`). Link rewriting needs it. For a folder that already existed, take the id from `qontext_ls`.
+
+### Structure files (only if 2b.1 is on)
+
+Write one `.qontext.structure.md` per folder that had a description file, right after that folder's `mkdir` and before its content files. The repo root maps to `<target>/.qontext.structure.md`.
+
+Rules:
+
+- **The file name starts with a dot.** That is allowed for files. Do not apply the folder `dot-` rule to it. Never wrap it in a code fence.
+- If the folder already has a structure file, apply the mode from 2b.1: amend, keep, or replace.
+- Copy **no** source frontmatter key (`type`, `title`, `okf_version`, …) into the frontmatter. Qontext reads only `strictness`. Mention a bundle version, if the root description has one, in one sentence of the guidance.
+- Commit message: `"import: structure file from <repo-relative-path>"`. Progress line: `[struct] <qontext-path>`.
+
+Body. Frontmatter starts at byte 0, LF line endings, then the fixed preamble sentence, then the guidance:
+
+```md
+---
+strictness: <value from 2b.1>
+---
+
+This is a Qontext structure file. It records how this folder is organized so the continuous update agent places new content consistently. It is folder configuration, not knowledge: it is never indexed or retrieved as content. Edit the guidance below to steer placement.
+
+# <Folder name>
+
+<One-line purpose, taken from the description file's first heading or first paragraph.>
+
+## What belongs here
+
+<One bullet per entry in the description file, as "<Title>: <description>". Keep the description file's section headings as sub-groups.>
+
+## Subfolders
+
+<See the subfolder rule below.>
+
+## Naming
+
+<The observed file-name pattern, e.g. "lowercase with hyphens, one file per table".>
+
+## Do not
+
+- Do not create files here that do not match the types above. Report the ambiguity instead.
+```
+
+**Subfolder rule.** Decide per folder from its children:
+
+- **Closed set** — the children have different names and different purposes (e.g. `tables`, `metrics`, `policies`). List each one with its description.
+- **Open set** — three or more children follow one pattern: one folder per customer, one file per table, all files share one frontmatter `type`. Write the pattern as a rule instead: *"One subfolder per customer, named after the company in lowercase with hyphens. Do not list customers here."* Never enumerate the members, so a new child needs no structure-file edit.
+- **Unsure** — ask the user once for that folder, two options: list them, or write a rule.
+
+If 2b.2 chose "Keep log.md", add a `## Change log` section with the rule from 2b.2.
+
+### Link rewriting (always, not only with 2b.1)
+
+Qontext treats every Markdown link without a URI scheme as a cross-reference to a file or folder. The target must be a bare id (`doc_…` for a file, `dir_…` for a folder) or an absolute Qontext path. **A relative link (`customers.md`, `../tables/index.md`) makes the whole write fail** with an error like *"references a file or folder which cannot be resolved"*. So rewrite every relative link before writing. Links with a scheme (`https:`, `mailto:`), `#anchors`, and links inside fenced code blocks need no change.
+
+A target must exist before a link to it is written, and repos have link cycles. Use two passes:
+
+1. **Pass 1.** For each content file, resolve every relative link against the file's own folder to a repo-relative path, map it to its Qontext path, and write the link as `ref://<qontext-path>`. The scheme makes it inert, so the write succeeds. Write the file. Record `source path → doc_id` from the result.
+2. **Pass 2.** For each file that had at least one `ref://` link, replace each `ref://` target with the recorded id, then write the file again with message `"import: resolve links in <repo-relative-path>"`.
+
+Mapping rules for a target:
+
+- A description file converted in 2b.1, or a `log.md` dropped in 2b.2 → the **folder's** `dir_` id.
+- Any other imported file → its `doc_` id.
+- A folder → its `dir_` id.
+- A file that was not imported (skipped, sensitive, oversized, failed) → leave it as `ref://…` and count it as an unresolved link.
+
 ### File writing
 
 For each file (BFS order within each folder):
 
+0. **Skip** a description file that 2b.1 converted, and a `log.md` that 2b.2 dropped.
 1. **Binary detection.** Read the first 8 KB. If any NUL byte (`0x00`) is present, treat as binary and **skip** (log reason).
 2. **Size check.** If size > 45 KB, **skip** (log reason) — or apply the user's split-folder choice from 2g if they picked it.
 3. **Compute Qontext path:**
@@ -268,9 +389,9 @@ For each file (BFS order within each folder):
    - If the filename already ends in `.md`, keep it. Otherwise, append `.md` (`foo.py` → `foo.py.md`, `Dockerfile` → `Dockerfile.md`).
    - Sanitize the filename itself for forbidden characters (same set as folders)
    - Prepend the target Qontext path
-   - Important: files cannot live at root. If the user picked a target of `/`, refuse and prepend a `/<repo-name>` wrapper instead.
+   - Files may live at the root (`/file.md`). Still, if the user picked a target of `/`, prepend a `/<repo-name>` wrapper so the import stays one subtree.
 4. **Compose the body:**
-   - If the source file already ended in `.md`, use its content as-is (no wrapping).
+   - If the source file already ended in `.md`, use its content as-is (no wrapping), with relative links rewritten (see Link rewriting).
    - Otherwise, wrap in a fenced code block. To avoid fence collision: scan the file for the longest run of consecutive backticks; use that run length **+ 1** as the fence length (minimum 3 backticks). Open with the language tag (see table below), close with the same number of backticks.
 
      Example for a `.py` file:
@@ -332,9 +453,11 @@ Done.
     - oversized: 3
     - sensitive: 1
   Failed:    0 files
+  Structure files: 6 written (1 amended)
+  Links:     41 rewritten, 2 unresolved
 ```
 
-If `Failed > 0`, list each failed file with its Qontext path and error message under the count.
+If `Failed > 0`, list each failed file with its Qontext path and error message under the count. If unresolved links > 0, list each one as `<file>: <original link target>`.
 
 ---
 
@@ -362,8 +485,10 @@ These constraints come from the `qontext-ai` MCP. Bake them into every path you 
 
 - **Absolute paths only.** Everything starts with `/`.
 - **File paths must end in `.md`.**
-- **Files cannot live at the root.** Every file must be under at least one folder.
-- **Folder names must not start with `.`** (use a `dot-` prefix).
+- **Files may live at the root** (`/file.md`). This skill still wraps the import in `/<repo-name>`.
+- **Folder names must not start with `.`** (use a `dot-` prefix). File names may (`.qontext.structure.md`).
+- **`.qontext.structure.md` is the folder's structure file.** One per folder. Frontmatter holds only `strictness`. Never indexed or retrieved.
+- **Links are cross-references.** A Markdown link without a URI scheme must point at a bare id (`doc_…`, `dir_…`) or an absolute Qontext path, or the write fails. Rewrite relative links first (Step 3 → Link rewriting).
 - **Folder names must not end in `.md`** (that's the file suffix).
 - **Forbidden characters in any name:** `; $ | & \ < > * ? [ ] { } : ` and backtick (also control characters).
 - **`qontext_mkdir` is not recursive** — parents must exist.
@@ -378,6 +503,7 @@ These constraints come from the `qontext-ai` MCP. Bake them into every path you 
 - **Network / 5xx on a write** → handled by the retry-once rule. Persistent failure → log and continue.
 - **Sanitization collision** → handled by `-1`/`-2` suffixing.
 - **Path too long / Qontext rejects path** → log and skip that file; continue.
+- **"references a file or folder which cannot be resolved"** → a link was not rewritten. Rewrite it to `ref://…` or to the recorded id and retry once; on a second failure, log and continue.
 - **User cancels mid-run** → just stop. Already-written files stay in Qontext. The skill is not deleted.
 
 ---
